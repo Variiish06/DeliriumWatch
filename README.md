@@ -397,12 +397,11 @@ Open `notebooks/deliriumwatch_model.ipynb` and run all cells. Reproduces AUROC 0
 - [ ] Calibration curve analysis
 
 ### Planned 📋
-- [ ] Lab features — sodium, BUN, creatinine, glucose (established delirium biomarkers)
 - [ ] Mechanical ventilation duration feature
 - [ ] Sedation trajectory slope (direction of change, not just cumulative dose)
 - [ ] Fairness analysis by demographics
 - [ ] Streamlit clinical decision support app
-- [ ] Paper write-up (target: ML4H / CHIL / AMIA)
+
 
 ---
 
@@ -419,7 +418,8 @@ PhysioNet: vijay0820
 If you use this work, please cite:
 
 ```
-Vasa Shashank,Nandan Reddy,Chethan Prakash,Kuncham, V.S. (2026). DeliriumWatch: Temporal Early Warning System for ICU 
+Vasa Shashank,Nandan Reddy,Chethan Prakash,Kuncham, V.S. (2026).
+DeliriumWatch: Temporal Early Warning System for ICU 
 Delirium Onset Using Nighttime Intervention Density from MIMIC-IV. 
 GitHub: https://github.com/Variiish06/DeliriumWatch
 ```
@@ -439,4 +439,4 @@ Full instructions: https://physionet.org/content/mimiciv/3.1/
 
 ---
 
-*DeliriumWatch — Built on MIMIC-IV. Validated on 48,786 ICU stays. Targeting ML4H 2026.*
+*DeliriumWatch — Built on MIMIC-IV. Validated on 48,786 ICU stays.*
