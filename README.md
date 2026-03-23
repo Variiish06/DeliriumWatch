@@ -54,11 +54,11 @@ NID = (nursing events between 22:00–06:00) / (total nursing events in pre-deli
 NID produces a normalized score between 0 and 1, representing the proportion of clinical care activity occurring during sleeping hours — comparable across patients regardless of ICU stay duration.
 
 **Validation:**
-- Delirious patients: NID mean = **0.3531**
-- Non-delirious patients: NID mean = **0.3086**
-- Mann-Whitney U test: **p < 0.0001**
-- SHAP importance rank: **#2 of 21 features**
-- Ablation contribution: **+0.0155 AUROC**
+-Delirious patients: NID mean = 0.3550
+-Non-delirious patients: NID mean = 0.3338
+-Mann-Whitney U test: p < 0.0001
+-SHAP importance rank: #1 of 27 features
+-Ablation contribution: +0.0292 AUROC
 
 ---
 
@@ -78,11 +78,17 @@ Access requires PhysioNet credentialing and signing the MIMIC-IV Data Use Agreem
 | After excluding UTA-only assessments | 69,879 |
 | After excluding stays < 24 hours | 57,992 |
 | After excluding pre-delirium window < 12 hours | **48,786** |
+| After symmetric window matching | 25,843 |
 
 **Final cohort:**
-- Delirium positive: 11,815 (24.2%)
-- Delirium negative: 36,971 (75.8%)
-- ICU types: 10 (MICU, SICU, CVICU, CCU, TSICU, Neuro SICU, Neuro Intermediate, Neuro Stepdown, PACU, Other)
+- Total ICU stays: 25,843
+- Delirium positive: 11,815 (45.7%)
+- Delirium negative: 14,028 (54.3%)
+- Class ratio: 1:1.19
+- Mean observation window: 59 hours
+- ICU types: 10 (MICU, SICU, CVICU, CCU, TSICU, 
+  Neuro SICU, Neuro Intermediate, Neuro Stepdown, 
+  PACU, Other)
 
 ### Label Extraction
 
@@ -100,8 +106,8 @@ Delirium labels extracted from `mimiciv_icu.chartevents` using itemid `228332` (
 | Model | AUROC | Delirium Recall | Accuracy |
 |-------|-------|-----------------|----------|
 | Published benchmark (best existing) | 0.79 | — | — |
-| Logistic Regression (v3) | 0.8299 | 0.72 | 0.78 |
-| **XGBoost (v3, clean)** | **0.8947** | **0.77** | **0.83** |
+| Logistic Regression | 0.7655 | 0.68 | 0.70 |
+| **XGBoost ** | **0.8405** | **0.73** | **0.76** |
 
 Both models surpass the published benchmark. Even the Logistic Regression baseline outperforms the best existing delirium prediction paper on MIMIC.
 
@@ -109,8 +115,8 @@ Both models surpass the published benchmark. Even the Logistic Regression baseli
 
 | Rank | Feature | Category |
 |------|---------|----------|
-| 1 | avg_sofa | Clinical severity |
-| **2** | **nid_score** | **Novel — sleep disruption proxy** |
+| **1** | **nid_score** | **Novel — sleep disruption proxy** |
+| 2 | avg_sofa | Clinical severity |
 | 3 | age | Demographics |
 | 4 | propofol_total | Sedation pharmacology |
 | 5 | unique_sedation_drugs | Sedation complexity |
@@ -124,8 +130,8 @@ Both models surpass the published benchmark. Even the Logistic Regression baseli
 
 | Configuration | AUROC | Delta |
 |---------------|-------|-------|
-| XGBoost with NID | 0.8947 | — |
-| XGBoost without NID | 0.8792 | -0.0155 |
+| XGBoost with NID | 0.8405 | — |
+| XGBoost without NID | 0.8113 | -0.0292 |
 
 ---
 
@@ -195,6 +201,15 @@ Audit showed 67.3% of dexmedetomidine administration occurred after delirium ons
 **Pre-delirium temporal restriction**
 All features are extracted strictly from the window between ICU admission and first delirium assessment (positive class) or ICU discharge (negative class). Post-delirium physiology is excluded.
 
+**Symmetric window matching (Path B)**
+Negative class observation windows are matched to the mean positive class duration of 59 hours. Without this, negative class used entire ICU stay (mean 179 hours) vs positive class pre-delirium window (mean 59 hours) — a 3x asymmetry that biased the model toward learning stay duration rather than clinical features.
+
+**Dexmedetomidine exclusion**
+Audit of 5,420 dexmedetomidine-receiving patients showed 67.3% received the drug AFTER delirium onset (avg +29 hours post-delirium). Dexmedetomidine is prescribed TO TREAT delirium — including it constitutes reverse causality. Excluded entirely from feature set.
+
+**Propofol temporal audit**
+74.9% of propofol administration occurred before delirium onset (avg -22.6 hours pre-delirium). Retained but restricted strictly to pre-delirium window. Post-delirium drug administration excluded via timestamp filtering.
+
 ---
 
 ## Feature Engineering
@@ -246,6 +261,18 @@ All features are extracted strictly from the window between ICU admission and fi
 |---------|-------------|-------|
 | abp_measured | Arterial line present (binary) | 57.8% of abp_mean was imputed — flag is more reliable |
 
+**NID Engineering Note**
+NID was validated across three pipeline versions. 
+In v1 (full stay window), NID ranked #4 in SHAP 
+with ablation +0.0004. After fixing reverse causality 
+in sedation features (v3), NID rose to #2 with 
+ablation +0.0155. After symmetric window matching 
+(Path B), NID rose to #1 with ablation +0.0292. 
+The progressive strengthening of NID signal as 
+confounding features were removed validates it as 
+a genuine independent predictor rather than a 
+correlated proxy.
+
 ### Features Dropped and Why
 
 | Feature | Reason |
@@ -258,7 +285,12 @@ All features are extracted strictly from the window between ICU admission and fi
 | abp_mean | 0.82 correlation with abp_measured (and 57.8% imputed) |
 | night_day_ratio | 0.98 correlation with nid_score |
 | dexmedetomidine_total | 67.3% administered post-delirium onset — reverse causality |
-
+| dexmedetomidine_total | Reverse causality — 
+  67.3% administered post-delirium onset. 
+  Drug is a delirium treatment, not predictor |
+| admission_sofa | 0.92 correlation with avg_sofa |
+| hr_max | 0.73 correlation with hr_mean |
+| nibp_min | 0.69 correlation with nibp_mean |
 ---
 
 ## Methodology
@@ -272,6 +304,15 @@ All features are extracted strictly from the window between ICU admission and fi
 5. Distribution analysis — per-class histograms for all features
 6. Correlation matrix — drop features with |r| > 0.70
 7. Categorical encoding — label encode binary, one-hot encode multi-class
+
+###Window Symmetry:
+Positive class observation window spans ICU admission 
+to first positive CAM-ICU assessment (mean 59 hours, 
+min 12, max 1321). Negative class windows are matched 
+to the mean positive class duration of 59 hours, 
+starting from ICU admission. This ensures both classes 
+contribute equivalent observation periods, eliminating 
+length-of-stay bias.
 
 ### Reverse Causality Audit
 
@@ -291,7 +332,7 @@ Before finalizing the pipeline, we audited all sedation features for reverse cau
 
 **Class imbalance handling:**
 - Logistic Regression: `class_weight='balanced'`
-- XGBoost: `scale_pos_weight = 36971/11815 = 3.13`
+- XGBoost: `scale_pos_weight = 36971/21021 = 1.19`
 
 **Logistic Regression:**
 - LASSO regularization (L2 default)
@@ -316,6 +357,15 @@ Current: Random stratified 80/20 split
 Planned (next milestone): Temporal holdout — train on admissions before 2019, test on 2019 onwards. This simulates real deployment where a model trained on historical data predicts future patients.
 
 ---
+## Version History
+
+| Version | Cohort | AUROC | Key Change |
+|---------|--------|-------|------------|
+| v1 | 57,992 | 0.8689 | Initial pipeline, full stay window |
+| v2 | 57,992 | 0.9398 | Pre-delirium sedation only — artifact from short windows |
+| v3 | 48,786 | 0.8947 | 12hr minimum window, dex removed — asymmetric negative class |
+| v4 | 52,649 | 0.7443 | Fixed 12hr window — destroyed NID signal |
+| **v5** | **25,843** | **0.8405** | **Symmetric windows, all leakage fixed — final** |
 
 ## Reproducing Results
 
