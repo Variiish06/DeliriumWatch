@@ -3,7 +3,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
 [![MIMIC-IV](https://img.shields.io/badge/Data-MIMIC--IV%20v3.1-green.svg)](https://physionet.org/content/mimiciv/3.1/)
-[![AUROC](https://img.shields.io/badge/AUROC-0.8947-brightgreen.svg)]()
+[![AUROC](https://img.shields.io/badge/AUROC-0.8405-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-PhysioNet%20DUA-red.svg)]()
 
 > **Predicting ICU delirium onset before it happens — using a novel sleep disruption proxy engineered from nursing timestamp patterns in MIMIC-IV.**
