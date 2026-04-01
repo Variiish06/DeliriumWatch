@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DeliriumWatch Bedside Console</title>
+    <!-- Fonts and Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      :root {
+        --dw-bg: #f8f9fa;
+        --dw-card: #ffffff;
+        --dw-primary: #1e40af;
+        --dw-high: #dc2626;
+        --dw-medium: #d97706;
+        --dw-low: #059669;
+        font-family: 'Inter', sans-serif;
+      }
+      body {
+        background-color: var(--dw-bg);
+        color: #334155;
+      }
+      .navbar-brand {
+        font-weight: 700;
+        letter-spacing: -0.5px;
+      }
+      .card-elevated {
+        border: none;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        margin-bottom: 20px;
+        background: var(--dw-card);
+      }
+      .card-header-sleek {
+        background: transparent;
+        border-bottom: 1px solid #e2e8f0;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+        font-weight: 600;
+      }
+      .form-label {
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #475569;
+      }
+      .risk-score-display {
+        font-size: 3rem;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .badge-high { background-color: var(--dw-high); }
+      .badge-med { background-color: var(--dw-medium); }
+      .badge-low { background-color: var(--dw-low); }
+      .action-btn {
+        width: 100%;
+        margin-bottom: 0.5rem;
+        border-radius: 8px;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm" style="background: linear-gradient(90deg, #1e40af, #3b82f6) !important;">
+      <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center" href="#">
+          <i class="fa-solid fa-heart-pulse me-2 fs-4"></i>
+          DeliriumWatch
+        </a>
+        <div class="text-white small">
+          <i class="fa-solid fa-server me-1"></i> Edge Node 4 • NICU Bed 12
+        </div>
+      </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+      <div class="row">
+        <!-- LEFT COLUMN: INPUTS -->
+        <div class="col-xl-5 col-lg-6 mb-4">
+          <div class="card card-elevated h-100">
+            <div class="card-header card-header-sleek d-flex justify-content-between align-items-center">
+              <span><i class="fa-solid fa-user-injured me-2 text-primary"></i>Patient Telemetry & Data</span>
+            </div>
+            <div class="card-body">
+              <form method="post" id="predictionForm">
+                
+                <!-- Demographics & Context -->
+                <h6 class="text-muted small fw-bold text-uppercase mb-3 mt-2">Demographics & Clinical Context</h6>
+                <div class="row g-3 mb-4">
+                  <div class="col-md-3">
+                    <label class="form-label">Age</label>
+                    <input type="number" step="1" class="form-control form-control-sm" name="age" value="{{ values['age'] }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Gender</label>
+                    <select class="form-select form-select-sm" name="gender_select">
+                      <option value="Male" {% if values['gender'] == 0 %}selected{% endif %}>Male</option>
+                      <option value="Female" {% if values['gender'] == 1 %}selected{% endif %}>Female</option>
+                    </select>
+                  </div>
+                  <div class="col-md-5">
+                    <label class="form-label">ICU Area</label>
+                    <select class="form-select form-select-sm" name="icu_select">
+                      {% for icu in icu_options %}
+                        <option value="{{ icu }}" {% if icu == icu_sel %}selected{% endif %}>{{ icu }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label" title="Sequential Organ Failure Assessment">Avg SOFA <i class="fa-solid fa-circle-info text-muted"></i></label>
+                    <input type="number" step="0.1" class="form-control form-control-sm" name="avg_sofa" value="{{ values['avg_sofa'] }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Admission SOFA</label>
+                    <input type="number" step="0.1" class="form-control form-control-sm" name="admission_sofa" value="{{ values['admission_sofa'] }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label fw-bold text-primary" title="Nighttime Intervention Density">NID Score <i class="fa-solid fa-moon"></i></label>
+                    <input type="number" step="0.01" min="0" max="1" class="form-control form-control-sm border-primary" name="nid_score" value="{{ values['nid_score'] }}">
+                  </div>
+                </div>
+
+                <!-- Vitals -->
+                <h6 class="text-muted small fw-bold text-uppercase mb-3 mt-4">Vitals Summaries</h6>
+                <div class="row g-3 mb-4">
+                  <div class="col-3">
+                    <label class="form-label">HR Mean</label>
+                    <input type="number" step="0.1" class="form-control form-control-sm" name="hr_mean" value="{{ values['hr_mean'] }}">
+                  </div>
+                  <div class="col-3">
+                    <label class="form-label">RR Mean</label>
+                    <input type="number" step="0.1" class="form-control form-control-sm" name="rr_mean" value="{{ values['rr_mean'] }}">
+                  </div>
+                  <div class="col-3">
+                    <label class="form-label">SpO2 Min</label>
+                    <input type="number" step="0.1" class="form-control form-control-sm" name="spo2_min" value="{{ values['spo2_min'] }}">
+                  </div>
+                  <div class="col-3">
+                    <label class="form-label">NIBP Mean</label>
+                    <input type="number" step="0.1" class="form-control form-control-sm" name="nibp_mean" value="{{ values['nibp_mean'] }}">
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">ABP Measured?</label>
+                    <select class="form-select form-select-sm" name="abp_measured">
+                      <option value="1" {% if values['abp_measured'] == 1 %}selected{% endif %}>Yes (1)</option>
+                      <option value="0" {% if values['abp_measured'] == 0 %}selected{% endif %}>No (0)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Sedation -->
+                <h6 class="text-muted small fw-bold text-uppercase mb-3 mt-4">Sedation Pharmacology</h6>
+                <div class="row g-3 mb-4">
+                  <div class="col-4">
+                    <label class="form-label">Propofol (mg)</label>
+                    <input type="number" step="1" class="form-control form-control-sm" name="propofol_total" value="{{ values['propofol_total'] }}">
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">Fentanyl (mcg)</label>
+                    <input type="number" step="1" class="form-control form-control-sm" name="fentanyl_total" value="{{ values['fentanyl_total'] }}">
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">Unique Sedatives</label>
+                    <input type="number" step="1" class="form-control form-control-sm" name="unique_sedation_drugs" value="{{ values['unique_sedation_drugs'] }}">
+                  </div>
+                </div>
+
+                <hr>
+                
+                <div class="row align-items-center">
+                  <div class="col-md-7">
+                    <label class="form-label mb-1">Inference Engine</label>
+                    <select class="form-select" name="model_select" style="background-color: #f1f5f9;">
+                      <option value="ensemble" {% if selected_model == 'ensemble' %}selected{% endif %}>
+                        Voting Ensemble (AUC {{ '%.4f'|format(aurocs['ensemble']) }}) {% if not models_loaded['ensemble'] %}❌{% endif %}
+                      </option>
+                      <option value="xgb" {% if selected_model == 'xgb' %}selected{% endif %}>
+                        XGBoost (AUC {{ '%.4f'|format(aurocs['xgb']) }}) {% if not models_loaded['xgb'] %}❌{% endif %}
+                      </option>
+                      <option value="lr" {% if selected_model == 'lr' %}selected{% endif %}>
+                        Logistic Baseline (AUC {{ '%.2f'|format(aurocs['lr']) }}) {% if not models_loaded['lr'] %}❌{% endif %}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="col-md-5 text-end mt-3 mt-md-0">
+                    <button type="submit" class="btn btn-primary w-100 py-2 fw-bold shadow-sm">
+                      <i class="fa-solid fa-microchip me-2"></i>Run Inference
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: OUTPUTS -->
+        <div class="col-xl-7 col-lg-6">
+          
+          <div class="row">
+            <!-- RISK GAUGE & SUMMARY -->
+            <div class="col-md-6 mb-4">
+              <div class="card card-elevated h-100 text-center py-3">
+                <div class="card-body">
+                  <h5 class="card-title text-muted mb-4 uppercase">Delirium Onset Risk</h5>
+                  
+                  {% if prob is not none %}
+                    <div style="width: 220px; margin: 0 auto; position: relative;">
+                      <canvas id="gaugeChart"></canvas>
+                      <div style="position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%);">
+                        <span class="risk-score-display 
+                          {% if label == 'HIGH' %}text-danger{% elif label == 'MEDIUM' %}text-warning{% else %}text-success{% endif %}">
+                          {{ '%.0f'|format(prob*100) }}%
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {% set badge = 'badge-success bg-success' %}
+                    {% if label == 'HIGH' %}
+                      {% set badge = 'badge-danger bg-danger' %}
+                    {% elif label == 'MEDIUM' %}
+                      {% set badge = 'badge-warning bg-warning text-dark' %}
+                    {% endif %}
+                    
+                    <h4 class="mt-4"><span class="badge {{ badge }} px-4 py-2 rounded-pill"><i class="fa-solid fa-triangle-exclamation me-2"></i>{{ label }} RISK</span></h4>
+                  {% else %}
+                    <div class="mt-5 text-muted d-flex flex-column align-items-center">
+                      <i class="fa-solid fa-chart-pie mb-3 opacity-25" style="font-size: 5rem;"></i>
+                      <p>Run inference to generate risk score.</p>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <!-- CLINICAL ESCALATION WORKFLOW -->
+            <div class="col-md-6 mb-4">
+              <div class="card card-elevated h-100">
+                <div class="card-header card-header-sleek">
+                  <i class="fa-solid fa-pager me-2 text-danger"></i>Clinical Action Protocol
+                </div>
+                <div class="card-body d-flex flex-column justify-content-center">
+                  {% if prob is not none and (label == 'HIGH' or label == 'MEDIUM') %}
+                    <div class="alert alert-danger px-3 py-2 mb-4 d-flex align-items-center">
+                      <i class="fa-solid fa-bell fa-shake me-3 fs-3"></i>
+                      <div>
+                        <strong>Threshold Exceeded</strong><br>
+                        Immediate assessment recommended.
+                      </div>
+                    </div>
+                    <button class="btn btn-warning action-btn text-dark shadow-sm" onclick="alert('Doctor paged to NICU Bed 12.'); this.innerHTML = '<i class=\'fa-solid fa-check me-2\'></i>Doctor Dispatched'; this.classList.replace('btn-warning','btn-success');">
+                      <i class="fa-solid fa-truck-medical me-2"></i>Dispatch Rapid Response
+                    </button>
+                    <button class="btn btn-outline-secondary action-btn text-dark mt-2" onclick="this.innerHTML = '<i class=\'fa-solid fa-check-double me-2\'></i>Acknowledged'; this.disabled=true;">
+                      <i class="fa-solid fa-eye me-2"></i>Acknowledge Alert
+                    </button>
+                    <button class="btn btn-outline-danger action-btn mt-2 border-0 bg-light" onclick="alert('Alarms silenced for 30 minutes.')">
+                      <i class="fa-solid fa-volume-xmark me-2"></i>Silence 30 Min
+                    </button>
+                  {% elif prob is not none %}
+                    <div class="alert alert-success px-3 py-2 d-flex align-items-center">
+                      <i class="fa-solid fa-shield-check me-3 fs-3"></i>
+                      <div>
+                        <strong>Patient Stable</strong><br>
+                        Continue routine monitoring.
+                      </div>
+                    </div>
+                  {% else %}
+                    <p class="text-muted text-center mt-3">Awaiting patient data...</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SHAP EXPLAINABILITY CHART -->
+          <div class="card card-elevated">
+            <div class="card-header card-header-sleek d-flex justify-content-between align-items-center">
+              <span><i class="fa-solid fa-microscope me-2 text-info"></i>Feature Importance (SHAP)</span>
+              <span class="badge bg-light text-dark border">XGBoost Engine</span>
+            </div>
+            <div class="card-body">
+              {% if shap_available %}
+                <div style="height: 300px;">
+                  <canvas id="shapChart"></canvas>
+                </div>
+                <div class="d-flex justify-content-center gap-4 mt-3 small">
+                  <div><span class="d-inline-block rounded-circle me-1" style="width: 10px; height: 10px; background: rgba(5, 150, 105, 0.8);"></span> <span class="text-muted">Protective (↓ Risk)</span></div>
+                  <div><span class="d-inline-block rounded-circle me-1" style="width: 10px; height: 10px; background: rgba(220, 38, 38, 0.8);"></span> <span class="text-muted">Harmful (↑ Risk)</span></div>
+                </div>
+              {% else %}
+                <div class="text-center p-4 text-muted">
+                  <i class="fa-solid fa-sitemap mb-3 opacity-25" style="font-size: 3rem;"></i>
+                  <p>SHAP explanations load automatically when using the XGBoost model.</p>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden data transport to JS -->
+    <script id="shapData" type="application/json">
+      {{ shap_json | safe }}
+    </script>
+    {% if prob is not none %}
+    <script id="probData" type="application/json">
+      {{ prob }}
+    </script>
+    {% endif %}
+
+    <script>
+      // 1. GAUGE CHART
+      const probElem = document.getElementById('probData');
+      if (probElem) {
+        const probVal = parseFloat(probElem.textContent) * 100;
+        const color = probVal >= 80 ? '#dc2626' : (probVal >= 70 ? '#d97706' : '#059669');
+        
+        const ctxGauge = document.getElementById('gaugeChart');
+        if (ctxGauge) {
+          new Chart(ctxGauge, {
+            type: 'doughnut',
+            data: {
+              datasets: [{
+                data: [probVal, 100 - probVal],
+                backgroundColor: [color, '#e2e8f0'],
+                borderWidth: 0,
+                cutout: '75%',
+                circumference: 180,
+                rotation: 270
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { tooltip: { enabled: false }, legend: { display: false } },
+              animation: { animateRotate: true, animateScale: true }
+            }
+          });
+        }
+      }
+
+      // 2. SHAP CHART
+      const shapElem = document.getElementById('shapData');
+      if (shapElem && shapElem.textContent.trim() !== "") {
+        try {
+          const shapData = JSON.parse(shapElem.textContent);
+          if (shapData.length > 0) {
+            // Sort to look nice (descending absolute value)
+            const labels = shapData.map(d => d.name);
+            const values = shapData.map(d => d.value);
+            
+            const backgroundColors = values.map(v => v >= 0 ? 'rgba(220, 38, 38, 0.8)' : 'rgba(5, 150, 105, 0.8)');
+            const borderColors = values.map(v => v >= 0 ? '#b91c1c' : '#047857');
+
+            const ctxShap = document.getElementById('shapChart');
+            new Chart(ctxShap, {
+              type: 'bar',
+              data: {
+                labels: labels,
+                datasets: [{
+                  label: 'SHAP Value (Impact on Output)',
+                  data: values,
+                  backgroundColor: backgroundColors,
+                  borderColor: borderColors,
+                  borderWidth: 1,
+                  borderRadius: 4,
+                }]
+              },
+              options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: function(ctx) { return 'SHAP: ' + ctx.raw.toFixed(3); }
+                    }
+                  }
+                },
+                scales: {
+                  x: { title: { display: true, text: 'SHAP Value (Impact on Log Odds)' }, grid: { drawBorder: false } },
+                  y: { grid: { display: false } }
+                }
+              }
+            });
+          }
+        } catch (e) {
+          console.error("No valid SHAP data to chart.");
+        }
+      }
+    </script>
+  </body>
+</html>
