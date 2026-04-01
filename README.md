@@ -366,30 +366,21 @@ pip install pandas numpy matplotlib seaborn scikit-learn xgboost shap optuna sci
 
 > ⚠️ Never commit CSV files. `.gitignore` excludes all patient data.
 
-## Web UI Demo (Streamlit)
+## Web UI Demo (Flask)
 
 This repository now includes a lightweight web interface for demos:
 
-- Path: `webui/app.py`
+- Path: `flask/app.py`
 - Purpose: single-patient risk preview + batch CSV inference
 - Modes:
-        - Model mode (if `deliriumwatch_ensemble.pkl` is present)
-        - Demo heuristic mode (automatic fallback if model file is missing)
-
+        - Model mode (if `deliriumwatch_ensemble.pkl` is present)=
 ### Run
 
 ```bash
-cd webui
+cd flask
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
-### What to show judges
-
-1. Enter one patient profile in **Single Patient** tab and run prediction
-2. Point out top risk drivers and threshold-based alert level
-3. Upload a CSV in **Batch CSV** tab and download scored output
-
 ---
 
 ## Ethical Considerations
