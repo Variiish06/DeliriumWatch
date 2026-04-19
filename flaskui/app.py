@@ -1,11 +1,17 @@
+import logging
 import os
-from io import BytesIO
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from sklearn.ensemble import VotingClassifier
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import joblib
 import numpy as np
 import pandas as pd
 from flask import Flask, render_template, request
+from gemma_agent import run_triage_agent
 
 try:
     import shap  # type: ignore
@@ -23,17 +29,49 @@ LR_PATH = os.environ.get("DW_LR_PATH", os.path.join(BASE_DIR, "..", "lr_model.pk
 ENSEMBLE_PATH = os.environ.get("DW_ENSEMBLE_PATH", os.path.join(BASE_DIR, "..", "deliriumwatch_ensemble.pkl"))
 FEATURE_NAMES_PATH = os.environ.get("DW_FEATS_PATH", os.path.join(BASE_DIR, "..", "feature_names.pkl"))
 
+# Must match `icu_*` column suffixes in training data (see Deliriumwatch_Model_TV.ipynb)
 ICU_OPTIONS = [
-    "Medical Intensive Care Unit (MICU)",
-    "Surgical Intensive Care Unit (SICU)",
-    "Cardiac Vascular Intensive Care Unit (CVICU)",
     "Coronary Care Unit (CCU)",
-    "Trauma SICU (TSICU)",
-    "Neuro SICU",
+    "Medical Intensive Care Unit (MICU)",
+    "Medical/Surgical Intensive Care Unit (MICU/SICU)",
     "Neuro Intermediate",
     "Neuro Stepdown",
-    "PACU",
+    "Neuro Surgical Intensive Care Unit (Neuro SICU)",
     "Other",
+    "Surgery/Vascular/Intermediate",
+    "Surgical Intensive Care Unit (SICU)",
+    "Trauma SICU (TSICU)",
+]
+
+# Temporal model feature order when no feature_names.pkl and model exposes no names
+DEFAULT_FEATURE_NAMES = [
+    "age",
+    "gender",
+    "avg_sofa",
+    "hr_mean",
+    "hr_std",
+    "rr_mean",
+    "rr_std",
+    "spo2_mean",
+    "spo2_min",
+    "nibp_mean",
+    "propofol_total",
+    "midazolam_total",
+    "lorazepam_total",
+    "fentanyl_total",
+    "unique_sedation_drugs",
+    "nid_score",
+    "abp_measured",
+    "icu_Coronary Care Unit (CCU)",
+    "icu_Medical Intensive Care Unit (MICU)",
+    "icu_Medical/Surgical Intensive Care Unit (MICU/SICU)",
+    "icu_Neuro Intermediate",
+    "icu_Neuro Stepdown",
+    "icu_Neuro Surgical Intensive Care Unit (Neuro SICU)",
+    "icu_Other",
+    "icu_Surgery/Vascular/Intermediate",
+    "icu_Surgical Intensive Care Unit (SICU)",
+    "icu_Trauma SICU (TSICU)",
 ]
 
 # Hard-coded best AUROCs from temporal notebook
@@ -49,13 +87,14 @@ def safe_load(path: str):
         return None
     try:
         return joblib.load(path)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).warning("Could not load model from %s: %s", path, e)
         return None
 
 
 def load_feature_names() -> List[str]:
     feats = safe_load(FEATURE_NAMES_PATH)
-    if isinstance(feats, (list, tuple)):
+    if isinstance(feats, (list, tuple)) and len(feats) > 0:
         return list(feats)
     return []
 
@@ -63,7 +102,47 @@ def load_feature_names() -> List[str]:
 XGB_MODEL = safe_load(XGB_PATH)
 LR_MODEL = safe_load(LR_PATH)
 ENSEMBLE_MODEL = safe_load(ENSEMBLE_PATH)
-FEATURE_NAMES = load_feature_names()
+
+
+def _feature_order_from_model(model) -> Optional[List[str]]:
+    """Column order for inference. VotingClassifier stores sanitized names in feature_names_in_
+    that break CatBoost; use CatBoost's feature_names_ when present."""
+    if isinstance(model, VotingClassifier):
+        cat = model.named_estimators_.get("cat")
+        cfn = getattr(cat, "feature_names_", None) if cat is not None else None
+        if cfn is not None and len(cfn) > 0:
+            return list(cfn)
+    fn = getattr(model, "feature_names_in_", None)
+    if fn is not None and len(fn) > 0:
+        return list(fn)
+    return None
+
+
+def resolve_feature_names() -> List[str]:
+    from_pickle = load_feature_names()
+    if from_pickle:
+        return from_pickle
+    for m in (ENSEMBLE_MODEL, XGB_MODEL, LR_MODEL):
+        fo = _feature_order_from_model(m)
+        if fo:
+            return fo
+    return list(DEFAULT_FEATURE_NAMES)
+
+
+FEATURE_NAMES = resolve_feature_names()
+
+
+def align_dataframe(X: pd.DataFrame, model) -> pd.DataFrame:
+    need = _feature_order_from_model(model)
+    if need is None:
+        return X
+    data = {}
+    for c in need:
+        if c in X.columns:
+            data[c] = X[c].values
+        else:
+            data[c] = 0.0
+    return pd.DataFrame(data, columns=need)
 
 
 def make_default_values() -> Dict[str, float]:
@@ -133,7 +212,8 @@ def predict_proba_model(model_name: str, X: pd.DataFrame) -> float:
     }.get(model_name)
     if model is None or not hasattr(model, "predict_proba"):
         return float("nan")
-    prob = model.predict_proba(X)[:, 1][0]
+    Xa = align_dataframe(X, model)
+    prob = model.predict_proba(Xa)[:, 1][0]
     return float(prob)
 
 
@@ -149,15 +229,16 @@ def compute_shap_dict(X: pd.DataFrame) -> Dict[str, float]:
     if shap is None or XGB_MODEL is None:
         return {}
     try:
+        Xa = align_dataframe(X, XGB_MODEL)
         explainer = shap.TreeExplainer(XGB_MODEL)
-        vals = explainer.shap_values(X)
+        vals = explainer.shap_values(Xa)
         if isinstance(vals, list):
             vals = vals[1][0]
         else:
             vals = vals[0]
             if getattr(vals, "ndim", 1) > 1 and vals.shape[1] == 2:
                 vals = vals[:, 1]
-        return {feat: float(v) for feat, v in zip(X.columns, vals)}
+        return {feat: float(v) for feat, v in zip(Xa.columns, vals)}
     except Exception:
         return {}
 
@@ -172,6 +253,7 @@ def index():
     icu_sel = ICU_OPTIONS[0]
 
     shap_max = 0.01
+    agent_result = None
 
     if request.method == "POST":
         selected_model = request.form.get("model_select", "ensemble")
@@ -182,6 +264,16 @@ def index():
         shap_dict = compute_shap_dict(X_row)
         shap_items = sorted(shap_dict.items(), key=lambda kv: abs(kv[1]), reverse=True)[:8]
         shap_max = max((abs(v) for k, v in shap_items), default=0.01)
+
+        # TODO: gemini_narrative = get_gemini_narrative(...)
+        # Pass gemini_narrative to render_template when ready
+
+        agent_result = run_triage_agent(
+            features=values,
+            shap_dict=shap_dict,
+            risk_level=label,
+            probability=prob
+        )
 
     return render_template(
         "index.html",
@@ -201,8 +293,9 @@ def index():
             "lr": LR_MODEL is not None,
             "ensemble": ENSEMBLE_MODEL is not None,
         },
+        agent_result=agent_result,
     )
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5040, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True)
