@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 import time
 import json
 import threading
@@ -22,6 +25,8 @@ try:
     MQTT_AVAILABLE = True
 except ImportError:
     MQTT_AVAILABLE = False
+
+from agent import run_delirium_agent
 
 app = Flask(__name__)
 
@@ -125,6 +130,36 @@ XGB_MODEL = safe_load(XGB_PATH)
 LR_MODEL = safe_load(LR_PATH)
 ENSEMBLE_MODEL = safe_load(ENSEMBLE_PATH)
 FEATURE_NAMES = load_feature_names()
+
+# ──────────────────────────────────────────────────────────────────
+# TEST COHORT — loaded once at startup for agent pipeline
+# ──────────────────────────────────────────────────────────────────
+_DATA_CSV       = os.environ.get("DW_DATA_CSV",       os.path.join(BASE_DIR, "..", "deliriumwatch_clean_tv.csv"))
+_YEAR_GROUPS_CSV = os.environ.get("DW_YEAR_GROUPS_CSV", os.path.join(BASE_DIR, "..", "year_groups.csv"))
+
+X_test = pd.DataFrame()
+y_test = pd.Series(dtype=int)
+high_risk_indices: List[int] = []
+
+try:
+    _df          = pd.read_csv(_DATA_CSV)
+    _year_groups = pd.read_csv(_YEAR_GROUPS_CSV)
+    _X           = _df.drop(columns=["delirium_label"])
+    _y           = _df["delirium_label"]
+    _test_mask   = _year_groups["anchor_year_group"].isin(["2017 - 2019", "2020 - 2022"])
+    X_test       = _X[_test_mask.values].reset_index(drop=True)
+    y_test       = _y[_test_mask.values].reset_index(drop=True)
+    print(f"Test cohort loaded: {len(X_test)} patients")
+except Exception as _e:
+    print(f"Could not load test cohort: {_e}")
+
+try:
+    _y_pred_proba     = ENSEMBLE_MODEL.predict_proba(X_test)[:, 1]
+    high_risk_indices = [int(i) for i, p in enumerate(_y_pred_proba) if p > 0.70]
+    print(f"High risk patients found: {len(high_risk_indices)}")
+except Exception as _e:
+    print(f"Could not compute high risk indices: {_e}")
+    high_risk_indices = list(range(0, 20))
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -556,5 +591,45 @@ def api_preset(preset_id):
     return jsonify({"error": "not found"}), 404
 
 
+# ──────────────────────────────────────────────────────────────────
+# AGENT ROUTES
+# ──────────────────────────────────────────────────────────────────
+@app.route("/agent", methods=["GET"])
+def agent_view():
+    return render_template("agent.html", high_risk_indices=high_risk_indices)
+
+
+@app.route("/api/agent/run", methods=["POST"])
+def api_agent_run():
+    try:
+        body        = request.get_json(force=True) or {}
+        patient_idx = body.get("patient_idx")
+
+        if not isinstance(patient_idx, int) or not (0 <= patient_idx <= len(X_test) - 1):
+            return jsonify({"error": "invalid index"}), 400
+
+        result = run_delirium_agent(patient_idx, ENSEMBLE_MODEL, X_test, y_test, FEATURE_NAMES)
+
+        if result["risk_result"]["risk_level"] == "HIGH":
+            try:
+                broker  = os.environ.get("DW_MQTT_BROKER", "172.20.10.2")
+                topic   = "deliriumwatch/pager/doc2/alerts"
+                payload = json.dumps({
+                    "patient_id": patient_idx,
+                    "risk":       result["risk_result"]["risk_percentage"],
+                    "alert":      result["alert_text"][:120],
+                    "timestamp":  datetime.now().isoformat(),
+                })
+                mqtt_publish.single(topic, payload, hostname=broker)
+                print(f"MQTT alert sent for patient {patient_idx}")
+            except Exception as mqtt_err:
+                print(f"MQTT broker offline, skipping: {mqtt_err}")
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5040, debug=True)
+    app.run(host="0.0.0.0", port=5050, debug=True)

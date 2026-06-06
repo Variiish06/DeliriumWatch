@@ -29,7 +29,7 @@ from waveshare_epd import epd2in13_V4 as epd_driver
 PAGER_ID   = os.environ.get("PAGER_ID", "doc1")
 PAGER_ZONE = os.environ.get("PAGER_ZONE", "Bay A")
 
-MQTT_BROKER = os.environ.get("MQTT_BROKER", "10.12.205.50")
+MQTT_BROKER = os.environ.get("MQTT_BROKER", "172.20.10.5")
 MQTT_PORT   = int(os.environ.get("MQTT_PORT", "1883"))
 
 ROTATE_INTERVAL = 8      # Seconds between patient rotations
