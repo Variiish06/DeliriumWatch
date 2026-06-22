@@ -105,6 +105,32 @@ PRESETS = {
         "unique_sedation_drugs": 1.0, "nid_score": 0.22,
         "icu_select": "Coronary Care Unit (CCU)",
     },
+    "neuro_trauma": {
+        "patient_name": "RODRIGUEZ, LUIS",
+        "patient_bed": "Neuro-SICU-04",
+        "patient_zone": "Bay D",
+        "gender_select": "Male",
+        "age": 42, "avg_sofa": 8.0, "admission_sofa": 8.0,
+        "hr_mean": 88.0, "hr_std": 10.0, "rr_mean": 18.0, "rr_std": 3.0,
+        "spo2_mean": 96.0, "spo2_min": 92.0, "nibp_mean": 95.0, "abp_measured": 1.0,
+        "propofol_total": 2400.0, "midazolam_total": 0.0,
+        "lorazepam_total": 0.0, "fentanyl_total": 2500.0,
+        "unique_sedation_drugs": 2.0, "nid_score": 0.65,
+        "icu_select": "Neuro SICU",
+    },
+    "cardiac_arrest": {
+        "patient_name": "SMITH, ROBERT",
+        "patient_bed": "CVICU-A-01",
+        "patient_zone": "Bay A",
+        "gender_select": "Male",
+        "age": 68, "avg_sofa": 12.0, "admission_sofa": 10.0,
+        "hr_mean": 105.0, "hr_std": 20.0, "rr_mean": 24.0, "rr_std": 5.0,
+        "spo2_mean": 92.0, "spo2_min": 85.0, "nibp_mean": 65.0, "abp_measured": 1.0,
+        "propofol_total": 0.0, "midazolam_total": 45.0,
+        "lorazepam_total": 12.0, "fentanyl_total": 1200.0,
+        "unique_sedation_drugs": 3.0, "nid_score": 0.88,
+        "icu_select": "Cardiac Vascular Intensive Care Unit (CVICU)",
+    },
 }
 
 # ──────────────────────────────────────────────────────────────────
@@ -168,16 +194,23 @@ except Exception as _e:
 ward_lock = threading.Lock()
 ward_patients: List[Dict] = []  # Each entry is a patient dict
 
+def broadcast_heatmap():
+    if not MQTT_AVAILABLE: return
+    try:
+        pts = get_patients()
+        mini_roster = [{"b": p.get("bed", ""), "l": p.get("label", ""), "r": p.get("risk_pct", "")} for p in pts]
+        import paho.mqtt.publish as mqtt_publish
+        mqtt_publish.single("deliriumwatch/ward/heatmap", json.dumps(mini_roster), hostname=MQTT_BROKER, port=MQTT_PORT, retain=True)
+    except Exception as e:
+        print(f"Failed to broadcast heatmap: {e}")
 
 def add_patient(patient_data: Dict):
-    """Add or update a patient in the ward roster."""
+    """Add a patient to the top of the roster (max 50) and broadcast heatmap."""
     with ward_lock:
-        # Update if same name+bed exists
-        for i, p in enumerate(ward_patients):
-            if p["name"] == patient_data["name"] and p["bed"] == patient_data["bed"]:
-                ward_patients[i] = patient_data
-                return
-        ward_patients.append(patient_data)
+        ward_patients.insert(0, patient_data)
+        if len(ward_patients) > 50:
+            ward_patients.pop()
+    broadcast_heatmap()
 
 
 def get_patients() -> List[Dict]:
@@ -187,8 +220,10 @@ def get_patients() -> List[Dict]:
 
 
 def clear_patients():
+    """Clear all patients and broadcast empty heatmap."""
     with ward_lock:
         ward_patients.clear()
+    broadcast_heatmap()
 
 
 def get_risk_summary() -> Dict:
@@ -360,8 +395,20 @@ def predict_proba_model(model_name: str, X: pd.DataFrame) -> float:
     if model is None or not hasattr(model, "predict_proba"):
         return float("nan")
     
-    # Raw predict proba
-    prob = model.predict_proba(X)[:, 1][0]
+    # Scale X using mock statistics since X_test dataset is unavailable
+    if model_name == "lr":
+        try:
+            default_vals = make_default_values()
+            X_mean = pd.Series(default_vals).reindex(X.columns).fillna(0)
+            X_std = (X_mean.abs() / 2) + 1.0 # arbitrary std to scale down inputs
+            X_scaled = (X - X_mean) / X_std
+            prob = model.predict_proba(X_scaled)[:, 1][0]
+        except Exception as e:
+            print(f"LR scaling failed: {e}")
+            prob = model.predict_proba(X)[:, 1][0]
+    else:
+        # Raw predict proba
+        prob = model.predict_proba(X)[:, 1][0]
     
     # --- CALIBRATION INTERCEPT SHIFT ---
     # XGBoost and Ensemble were trained with scale_pos_weight which artificially inflates 
